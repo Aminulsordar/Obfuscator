@@ -1,39 +1,74 @@
+/**
+ * ImgBB Uploader API (Vercel Ready)
+ * ---------------------------------
+ * Author: AceGun (Modified & Decorated)
+ * Version: 2.0
+ */
+
 const axios = require("axios");
 const FormData = require("form-data");
 
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY;
 
 module.exports = async (req, res) => {
-  // যদি শুধু ব্রাউজারে ওপেন করে (GET), তখন মেসেজ দেখাও
+  // ✅ GET: API status check
   if (req.method === "GET") {
-    return res.status(200).json({
-      success: true,
-      message: "✅ ImgBB Uploader API is running!",
-      usage: "Send a POST request with { imageUrl } in body to upload."
-    });
+    res.setHeader("Content-Type", "text/html");
+    return res.status(200).send(`
+      <html>
+        <head>
+          <title>ImgBB API</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; margin-top: 3em; }
+            h1 { color: #4caf50; }
+            code { background: #eee; padding: 4px 8px; border-radius: 5px; }
+          </style>
+        </head>
+        <body>
+          <h1>✅ ImgBB Uploader API is Running!</h1>
+          <p>Use <code>POST /api/imgbb</code> with JSON body:</p>
+          <pre>{ "imageUrl": "https://example.com/photo.png" }</pre>
+        </body>
+      </html>
+    `);
   }
 
+  // ❌ Reject non-POST requests
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed. Use POST." });
+    return res.status(405).json({ error: "Method not allowed. Use GET or POST." });
   }
 
   try {
-    const { imageUrl } = req.body;
+    // ✅ Parse JSON body manually (Vercel safe)
+    let body = "";
+    await new Promise((resolve) => {
+      req.on("data", (chunk) => (body += chunk.toString()));
+      req.on("end", resolve);
+    });
 
-    if (!imageUrl) {
-      return res.status(400).json({ error: "No imageUrl provided." });
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return res.status(400).json({ error: "Invalid JSON format." });
     }
 
-    // 1. Download image
+    const { imageUrl } = parsed;
+
+    if (!imageUrl) {
+      return res.status(400).json({ error: "Missing field: imageUrl" });
+    }
+
+    // ✅ Download image
     const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
 
-    // 2. Prepare form data
+    // ✅ Prepare form data
     const formData = new FormData();
     formData.append("image", Buffer.from(response.data, "binary"), {
       filename: "upload.png",
     });
 
-    // 3. Upload to ImgBB
+    // ✅ Upload to ImgBB
     const uploadRes = await axios.post(
       "https://api.imgbb.com/1/upload",
       formData,
@@ -45,15 +80,21 @@ module.exports = async (req, res) => {
 
     const data = uploadRes.data.data;
 
-    // 4. Return links
-    res.status(200).json({
+    // ✅ Response
+    return res.status(200).json({
       success: true,
       message: "✅ Upload successful!",
-      viewUrl: data.url,
-      directUrl: data.image.url,
+      viewUrl: data.url,       // ImgBB view link
+      directUrl: data.image.url, // Direct link (.png/.jpg)
+      size: data.size,
+      type: data.image.mime,
     });
   } catch (error) {
-    console.error("ImgBB Upload Error:", error.message);
-    res.status(500).json({ error: "Failed to upload image to ImgBB." });
+    console.error("ImgBB Upload Error:", error.message || error);
+    return res.status(500).json({
+      success: false,
+      error: "❌ Failed to upload image to ImgBB.",
+      details: error.message,
+    });
   }
 };
